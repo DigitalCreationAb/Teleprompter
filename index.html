@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#000000">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <title>DC Teleprompter</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Editor -->
+  <main id="editor" class="view">
+    <header>
+      <h1>Teleprompter</h1>
+      <p class="muted">Paste your script, press Start, and talk. The text follows your voice.</p>
+    </header>
+
+    <textarea id="script" spellcheck="false" placeholder="Paste or type your script here…"></textarea>
+
+    <div class="settings">
+      <label>Language
+        <select id="lang">
+          <option value="sv-SE">Svenska</option>
+          <option value="en-US">English (US)</option>
+          <option value="en-GB">English (UK)</option>
+          <option value="nb-NO">Norsk</option>
+          <option value="da-DK">Dansk</option>
+          <option value="fi-FI">Suomi</option>
+          <option value="de-DE">Deutsch</option>
+          <option value="es-ES">Español</option>
+          <option value="fr-FR">Français</option>
+        </select>
+      </label>
+      <label>Text size <span id="sizeVal"></span>
+        <input id="size" type="range" min="24" max="120" step="2">
+      </label>
+      <label class="check"><input id="mirror" type="checkbox"> Mirror (for glass rigs)</label>
+    </div>
+
+    <p id="support" class="warn" hidden></p>
+    <button id="start" class="primary">Start</button>
+  </main>
+
+  <!-- Prompter -->
+  <section id="prompter" class="view" hidden>
+    <div id="stage">
+      <div id="text"></div>
+    </div>
+    <div id="fade"></div>
+    <div id="marker"></div>
+    <div id="clock" title="Time talked">0:00</div>
+
+    <div id="controls">
+      <button id="exit" title="Back to editor (Esc)">✕</button>
+      <button id="back" title="Step back (←)">⟲</button>
+      <button id="mic" title="Toggle listening (Space)">🎤</button>
+      <button id="fwd" title="Step forward (→)">⟳</button>
+      <button id="smaller" title="Smaller text">A−</button>
+      <button id="bigger" title="Bigger text">A+</button>
+      <button id="flip" title="Mirror">⇋</button>
+    </div>
+    <div id="heard" aria-live="polite"></div>
+  </section>
+
+  <script src="app.js"></script>
+</body>
+</html>
