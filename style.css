@@ -151,6 +151,9 @@ button.primary {
   padding: 0 max(5vw, 16px);
 }
 #prompter.mirror #stage { transform: scaleX(-1); }
+#stage { touch-action: none; overscroll-behavior: none; cursor: grab; }
+#text.dragging { transition: none; }
+#text.dragging .w { transition: none; }
 
 #text {
   max-width: 1200px;

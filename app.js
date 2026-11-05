@@ -35,6 +35,9 @@ let lastResultAt = 0;
 let wakeLock = null;
 let lastTail = '';
 let backCandidate = null; // pending "we jumped too far" position awaiting confirmation
+let heardCount = 0; // words in the current recognition session's transcript
+let wordOffset = 0; // words before this index were heard before the last manual move
+let textY = 0; // current vertical offset of the text
 
 // Talk timer: starts on the first recognized speech, pauses while the mic is off.
 let talkedMs = 0;
@@ -143,7 +146,7 @@ function buildText() {
   }
 }
 
-function setPos(next, { force = false } = {}) {
+function setPos(next, { force = false, scroll = true } = {}) {
   next = Math.max(0, Math.min(seq.length, next));
   if (next === pos && !force) return;
   pos = next;
@@ -152,16 +155,40 @@ function setPos(next, { force = false } = {}) {
     t.el.classList.toggle('spoken', i < curToken);
     t.el.classList.toggle('current', i === curToken);
   });
-  scrollToCurrent();
+  if (scroll) scrollToCurrent();
+}
+
+// Manual moves: ignore words heard before the move, so they can't pull the position back.
+function moveTo(next) {
+  setPos(next, { force: true });
+  lastTail = '';
+  backCandidate = null;
+  wordOffset = heardCount;
+}
+
+function focusY() {
+  return window.innerHeight * parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--focus')) / 100;
+}
+
+function setTextY(y) {
+  textY = y;
+  $('#text').style.transform = `translateY(${y}px)`;
 }
 
 function scrollToCurrent() {
-  const text = $('#text');
   const curToken = pos < seq.length ? seq[pos] : tokens.length - 1;
   const el = tokens[curToken]?.el;
   if (!el) return;
-  const focusY = window.innerHeight * parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--focus')) / 100;
-  text.style.transform = `translateY(${focusY - el.offsetTop}px)`;
+  setTextY(focusY() - el.offsetTop);
+}
+
+// The word (as an index into seq) on the line currently under the reading marker.
+function posAtMarker() {
+  const lineY = focusY() - textY;
+  let t = tokens.findIndex(({ el }) => el.offsetTop + el.offsetHeight > lineY);
+  if (t === -1) return seq.length;
+  const i = seq.findIndex((s) => s >= t);
+  return i === -1 ? seq.length : i;
 }
 
 /* ---------- talk timer ---------- */
@@ -273,6 +300,8 @@ function startSession() {
   }
   lastTail = '';
   backCandidate = null;
+  heardCount = 0;
+  wordOffset = 0;
   sessionStartedAt = Date.now();
 
   const r = new SpeechRecognition();
@@ -295,7 +324,9 @@ function startSession() {
     const words = transcript.split(/\s+/).map(norm).filter(Boolean);
     if (words.length) startClock();
     $('#heard').textContent = transcript.trim().slice(-80);
-    follow(words);
+    heardCount = words.length;
+    if (dragging) return; // the user is placing the text by hand
+    follow(words.slice(wordOffset));
   };
 
   r.onerror = (e) => {
@@ -487,8 +518,8 @@ $('#start').addEventListener('click', openPrompter);
 
 $('#exit').addEventListener('click', closePrompter);
 $('#mic').addEventListener('click', () => (listening ? stopListening() : startListening()));
-$('#back').addEventListener('click', () => setPos(pos - 5));
-$('#fwd').addEventListener('click', () => setPos(pos + 5));
+$('#back').addEventListener('click', () => moveTo(pos - 5));
+$('#fwd').addEventListener('click', () => moveTo(pos + 5));
 $('#smaller').addEventListener('click', () => changeSize(-4));
 $('#bigger').addEventListener('click', () => changeSize(4));
 $('#flip').addEventListener('click', () => { settings.mirror = !settings.mirror; save(); applyLook(); });
@@ -502,13 +533,63 @@ function changeSize(delta) {
 
 // Tap a word to jump there (e.g. if you skipped ahead or went back).
 $('#text').addEventListener('click', (e) => {
+  if (suppressClick) return;
   const t = e.target.closest('.w');
   if (!t) return;
   const i = seq.findIndex((s) => s >= +t.dataset.t);
-  setPos(i === -1 ? seq.length : i, { force: true });
-  lastTail = '';
-  backCandidate = null;
+  moveTo(i === -1 ? seq.length : i);
 });
+
+// Drag the text (or use the mouse wheel) to move the reading position back or forward.
+// The word under the marker becomes the new position when you let go.
+let dragging = false;
+let suppressClick = false;
+let drag = null;
+let wheelTimer = null;
+
+function beginDrag() {
+  dragging = true;
+  $('#text').classList.add('dragging');
+}
+
+function dragTo(y) {
+  setTextY(y);
+  setPos(posAtMarker(), { scroll: false });
+}
+
+function endDrag() {
+  dragging = false;
+  $('#text').classList.remove('dragging');
+  moveTo(posAtMarker());
+}
+
+$('#stage').addEventListener('pointerdown', (e) => {
+  drag = { y: e.clientY, textY, moved: false };
+});
+window.addEventListener('pointermove', (e) => {
+  if (!drag) return;
+  const dy = e.clientY - drag.y;
+  if (!drag.moved && Math.abs(dy) < 8) return; // still a tap
+  if (!drag.moved) { drag.moved = true; beginDrag(); }
+  dragTo(drag.textY + dy);
+});
+['pointerup', 'pointercancel'].forEach((ev) => window.addEventListener(ev, () => {
+  if (!drag) return;
+  if (drag.moved) {
+    endDrag();
+    suppressClick = true; // the click that follows a drag is not a tap
+    setTimeout(() => { suppressClick = false; }, 0);
+  }
+  drag = null;
+}));
+
+$('#prompter').addEventListener('wheel', (e) => {
+  e.preventDefault();
+  if (!dragging) beginDrag();
+  dragTo(textY - e.deltaY);
+  clearTimeout(wheelTimer);
+  wheelTimer = setTimeout(endDrag, 250);
+}, { passive: false });
 
 ['pointermove', 'pointerdown', 'keydown'].forEach((ev) => $('#prompter').addEventListener(ev, poke));
 $('#prompter').addEventListener('pointerdown', (e) => { if (!e.target.closest('#controls')) retryFromTap(); });
@@ -518,8 +599,8 @@ document.addEventListener('keydown', (e) => {
   if ($('#prompter').hidden) return;
   if (e.key === 'Escape') closePrompter();
   else if (e.key === ' ') { e.preventDefault(); listening ? stopListening() : startListening(); }
-  else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') setPos(pos + 1);
-  else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') setPos(pos - 1);
+  else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') moveTo(pos + 1);
+  else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') moveTo(pos - 1);
   poke();
 });
 
