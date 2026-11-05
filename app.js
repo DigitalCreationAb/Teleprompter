@@ -400,8 +400,17 @@ $('#deleteSpeech').addEventListener('click', () => {
   showSpeech(settings.speeches[Math.max(0, i - 1)].id);
 });
 $('#lang').addEventListener('change', () => { settings.lang = $('#lang').value; save(); });
-$('#size').addEventListener('input', () => { settings.fontSize = +$('#size').value; save(); applyLook(); });
-$('#mirror').addEventListener('change', () => { settings.mirror = $('#mirror').checked; save(); applyLook(); });
+$('#size').addEventListener('input', () => { settings.fontSize = +$('#size').value; save(); applyLook(); flashPreview(); });
+$('#size').addEventListener('pointerdown', flashPreview);
+$('#mirror').addEventListener('change', () => { settings.mirror = $('#mirror').checked; save(); applyLook(); flashPreview(); });
+
+// Show the size preview only while the slider is being used.
+let previewTimer = null;
+function flashPreview() {
+  $('#preview').classList.add('show');
+  clearTimeout(previewTimer);
+  previewTimer = setTimeout(() => $('#preview').classList.remove('show'), 1200);
+}
 $('#start').addEventListener('click', openPrompter);
 
 $('#exit').addEventListener('click', closePrompter);
