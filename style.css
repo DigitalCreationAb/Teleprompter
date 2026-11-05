@@ -223,6 +223,8 @@ button.primary {
 #controls button { min-width: 44px; padding: 8px 10px; background: transparent; border-color: transparent; }
 #controls button:hover { background: var(--panel); }
 #mic.live { background: var(--live); border-color: var(--live); }
+#mic.waiting { border-color: var(--live); animation: blink 1s infinite; }
+@keyframes blink { 50% { opacity: .35; } }
 #prompter.idle #controls, #prompter.idle #heard { opacity: 0; }
 
 #heard {

@@ -26,6 +26,12 @@ let pos = 0;
 
 let recog = null;
 let listening = false; // user intent: should we be listening?
+let recogActive = false; // a recognition session is actually running
+let needsTap = false; // restarting failed; wait for a tap before trying again
+let failedStarts = 0;
+let restartTimer = null;
+let sessionStartedAt = 0;
+let lastResultAt = 0;
 let wakeLock = null;
 let lastTail = '';
 let backCandidate = null; // pending "we jumped too far" position awaiting confirmation
@@ -252,17 +258,38 @@ function follow(spoken) {
 function startListening() {
   if (!SpeechRecognition) return;
   listening = true;
-  $('#mic').classList.add('live');
+  failedStarts = 0;
+  needsTap = false;
+  startSession();
+}
+
+// Each session gets a fresh recognition object; reusing an ended one is less reliable on mobile.
+function startSession() {
+  clearTimeout(restartTimer);
+  restartTimer = null;
+  if (recog) {
+    recog.onend = null;
+    try { recog.abort(); } catch { /* ignore */ }
+  }
   lastTail = '';
   backCandidate = null;
+  sessionStartedAt = Date.now();
 
-  recog = new SpeechRecognition();
-  recog.lang = settings.lang;
-  recog.continuous = true;
-  recog.interimResults = true;
-  recog.maxAlternatives = 1;
+  const r = new SpeechRecognition();
+  recog = r;
+  r.lang = settings.lang;
+  r.continuous = true;
+  r.interimResults = true;
+  r.maxAlternatives = 1;
 
-  recog.onresult = (e) => {
+  r.onstart = () => {
+    recogActive = true;
+    failedStarts = 0;
+    updateMic();
+  };
+
+  r.onresult = (e) => {
+    lastResultAt = Date.now();
     let transcript = '';
     for (let i = 0; i < e.results.length; i++) transcript += e.results[i][0].transcript + ' ';
     const words = transcript.split(/\s+/).map(norm).filter(Boolean);
@@ -271,32 +298,77 @@ function startListening() {
     follow(words);
   };
 
-  recog.onerror = (e) => {
-    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
-      $('#heard').textContent = 'Microphone access was blocked. Allow it in the browser settings.';
-      stopListening();
-    }
+  r.onerror = (e) => {
+    // Mobile browsers sometimes refuse a restart that isn't triggered by a tap.
+    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') waitForTap();
   };
 
-  // Recognition stops on its own after silence or ~60s; restart while the user wants it on.
-  recog.onend = () => {
-    if (!listening) return;
-    try { recog.start(); }
-    catch { stopListening(); $('#heard').textContent = 'Tap 🎤 to resume listening.'; }
+  // Recognition stops on its own after silence; restart while the user wants it on.
+  r.onend = () => {
+    if (recog !== r) return;
+    recogActive = false;
+    updateMic();
+    if (listening && !needsTap) scheduleRestart();
   };
 
-  try { recog.start(); } catch { /* already started */ }
+  updateMic();
+  try { r.start(); } catch { scheduleRestart(); }
+}
+
+function scheduleRestart() {
+  if (restartTimer) return;
+  failedStarts++;
+  if (failedStarts > 5) { waitForTap(); return; }
+  restartTimer = setTimeout(startSession, Math.min(250 * failedStarts, 2000));
+}
+
+function waitForTap() {
+  needsTap = true;
+  clearTimeout(restartTimer);
+  restartTimer = null;
+  updateMic();
+  $('#heard').textContent = 'Stopped listening — tap the screen to resume.';
+  poke();
+}
+
+// Tapping the prompter wakes listening up if it has stopped or gone quiet.
+function retryFromTap() {
+  if (!listening) return; // paused on purpose with the mic button
+  const stale = Date.now() - lastResultAt > 3000;
+  if (needsTap || !recogActive || stale) {
+    needsTap = false;
+    failedStarts = 0;
+    $('#heard').textContent = 'Listening…';
+    startSession();
+  }
+}
+
+// Safety net: if a session never starts or ends without telling us, start a new one.
+setInterval(() => {
+  if (listening && !needsTap && !recogActive && !restartTimer && Date.now() - sessionStartedAt > 5000) {
+    scheduleRestart();
+  }
+}, 2000);
+
+function updateMic() {
+  $('#mic').classList.toggle('live', listening && recogActive);
+  $('#mic').classList.toggle('waiting', listening && !recogActive);
 }
 
 function stopListening() {
   listening = false;
+  needsTap = false;
+  recogActive = false;
+  clearTimeout(restartTimer);
+  restartTimer = null;
   pauseClock();
-  $('#mic').classList.remove('live');
+  $('#heard').textContent = '';
   if (recog) {
     recog.onend = null;
     try { recog.abort(); } catch { /* ignore */ }
     recog = null;
   }
+  updateMic();
 }
 
 /* ---------- screen wake lock ---------- */
@@ -439,6 +511,7 @@ $('#text').addEventListener('click', (e) => {
 });
 
 ['pointermove', 'pointerdown', 'keydown'].forEach((ev) => $('#prompter').addEventListener(ev, poke));
+$('#prompter').addEventListener('pointerdown', (e) => { if (!e.target.closest('#controls')) retryFromTap(); });
 document.addEventListener('pointerdown', () => { if (!$('#prompter').hidden) poke(); });
 
 document.addEventListener('keydown', (e) => {
