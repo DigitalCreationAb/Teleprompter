@@ -6,9 +6,17 @@ const STORE_KEY = 'dc-teleprompter:v1';
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
 const settings = Object.assign(
-  { text: '', lang: 'sv-SE', fontSize: 56, mirror: false },
+  { speeches: [], currentId: null, lang: 'sv-SE', fontSize: 56, mirror: false },
   load()
 );
+
+// Earlier versions stored a single script in settings.text; keep it as the first speech.
+if (typeof settings.text === 'string') {
+  if (settings.text.trim() && !settings.speeches.length) settings.speeches.push(newSpeech('', settings.text));
+  delete settings.text;
+}
+if (!settings.speeches.length) settings.speeches.push(newSpeech());
+if (!settings.speeches.some((s) => s.id === settings.currentId)) settings.currentId = settings.speeches[0].id;
 
 // tokens: every word as rendered. seq: indices into tokens that can be matched (have letters/digits).
 // pos: index into seq of the next word the speaker is expected to say.
@@ -33,6 +41,34 @@ function load() {
 }
 function save() {
   try { localStorage.setItem(STORE_KEY, JSON.stringify(settings)); } catch { /* private mode etc. */ }
+}
+
+/* ---------- speeches ---------- */
+function newSpeech(title = '', text = '') {
+  return { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), title, text };
+}
+
+function current() {
+  return settings.speeches.find((s) => s.id === settings.currentId);
+}
+
+function speechLabel(s) {
+  return s.title.trim() || s.text.trim().split(/\s+/).slice(0, 6).join(' ') || 'Untitled';
+}
+
+function renderSpeechList() {
+  const list = $('#speechList');
+  list.innerHTML = '';
+  for (const s of settings.speeches) list.add(new Option(speechLabel(s), s.id, false, s.id === settings.currentId));
+}
+
+function showSpeech(id) {
+  settings.currentId = id;
+  save();
+  $('#title').value = current().title;
+  $('#script').value = current().text;
+  renderSpeechList();
+  renderPreview();
 }
 
 /* ---------- text processing ---------- */
@@ -79,7 +115,7 @@ function buildText() {
   tokens = [];
   seq = [];
 
-  const paragraphs = settings.text.trim().split(/\n\s*\n/);
+  const paragraphs = current().text.trim().split(/\n\s*\n/);
   for (const para of paragraphs) {
     const p = document.createElement('p');
     const lines = para.split('\n');
@@ -272,18 +308,32 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- view switching ---------- */
+function renderPreview() {
+  const box = $('#previewText');
+  const words = current().text.trim().split(/\s+/).filter(Boolean).slice(0, 60);
+  box.classList.toggle('placeholder', !words.length);
+  box.textContent = '';
+  if (!words.length) {
+    box.textContent = 'This is how big your text will be in the prompter.';
+    return;
+  }
+  const first = document.createElement('span');
+  first.className = 'current';
+  first.textContent = words[0];
+  box.append(first, ' ' + words.slice(1).join(' '));
+}
+
 function applyLook() {
   document.documentElement.style.setProperty('--font-size', settings.fontSize + 'px');
   $('#prompter').classList.toggle('mirror', settings.mirror);
+  $('#preview').classList.toggle('mirror', settings.mirror);
   $('#sizeVal').textContent = settings.fontSize + 'px';
   $('#size').value = settings.fontSize;
   $('#mirror').checked = settings.mirror;
 }
 
 function openPrompter() {
-  settings.text = $('#script').value;
-  save();
-  if (!settings.text.trim()) { $('#script').focus(); return; }
+  if (!current().text.trim()) { $('#script').focus(); return; }
 
   $('#editor').hidden = true;
   $('#prompter').hidden = false;
@@ -313,9 +363,9 @@ function poke() {
 }
 
 /* ---------- wiring ---------- */
-$('#script').value = settings.text;
 $('#lang').value = settings.lang;
 applyLook();
+showSpeech(settings.currentId);
 
 if (!SpeechRecognition) {
   $('#support').hidden = false;
@@ -323,7 +373,32 @@ if (!SpeechRecognition) {
     'Speech recognition is not supported in this browser. Use Chrome (desktop/Android) or Safari (iPhone). You can still scroll manually.';
 }
 
-$('#script').addEventListener('input', () => { settings.text = $('#script').value; save(); });
+// Edits save straight into the selected speech.
+$('#script').addEventListener('input', () => {
+  current().text = $('#script').value;
+  save();
+  renderPreview();
+  if (!current().title.trim()) $('#speechList').selectedOptions[0].text = speechLabel(current());
+});
+$('#title').addEventListener('input', () => {
+  current().title = $('#title').value;
+  save();
+  $('#speechList').selectedOptions[0].text = speechLabel(current());
+});
+$('#speechList').addEventListener('change', () => showSpeech($('#speechList').value));
+$('#newSpeech').addEventListener('click', () => {
+  const s = newSpeech();
+  settings.speeches.push(s);
+  showSpeech(s.id);
+  $('#title').focus();
+});
+$('#deleteSpeech').addEventListener('click', () => {
+  if (!confirm(`Delete "${speechLabel(current())}"?`)) return;
+  const i = settings.speeches.findIndex((s) => s.id === settings.currentId);
+  settings.speeches.splice(i, 1);
+  if (!settings.speeches.length) settings.speeches.push(newSpeech());
+  showSpeech(settings.speeches[Math.max(0, i - 1)].id);
+});
 $('#lang').addEventListener('change', () => { settings.lang = $('#lang').value; save(); });
 $('#size').addEventListener('input', () => { settings.fontSize = +$('#size').value; save(); applyLook(); });
 $('#mirror').addEventListener('change', () => { settings.mirror = $('#mirror').checked; save(); applyLook(); });

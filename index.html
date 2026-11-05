@@ -20,6 +20,13 @@
       <p class="muted">Paste your script, press Start, and talk. The text follows your voice.</p>
     </header>
 
+    <div class="speeches">
+      <select id="speechList" aria-label="Saved speeches"></select>
+      <button id="newSpeech" title="New speech">+ New</button>
+      <button id="deleteSpeech" title="Delete this speech">Delete</button>
+    </div>
+    <input id="title" type="text" placeholder="Title (optional)" autocomplete="off">
+
     <textarea id="script" spellcheck="false" placeholder="Paste or type your script here…"></textarea>
 
     <div class="settings">
@@ -40,6 +47,10 @@
         <input id="size" type="range" min="24" max="120" step="2">
       </label>
       <label class="check"><input id="mirror" type="checkbox"> Mirror (for glass rigs)</label>
+    </div>
+
+    <div id="preview" aria-label="Text size preview">
+      <div id="previewText"></div>
     </div>
 
     <p id="support" class="warn" hidden></p>
